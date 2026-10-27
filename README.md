@@ -89,6 +89,8 @@ python eval_kit/score.py eval_kit/samples/clip_A_interactive.json
 │   └── output_example.md      # 真实运行结果
 └── taskcards/
     └── eval_task_cards.md     # 3 张完整评测任务卡
+open_models/
+└── hy-nomas_eval_plan.md      # 腾讯开源 Hy-Nomas：上手路径 + 交互使用 + 4 条评测任务设计
 ```
 
 工具只依赖 Python 标准库，无需安装任何包。
@@ -138,3 +140,15 @@ Genie 3 博客自己承认的五个局限，每条都是一张可设计的评测
 ### A4. 对一页纸核心判断的更新
 
 原判断「一致性 > 速度；数据可能是真正护城河」在 10 月的情报下依然成立，且多了一个支撑：RoboWM-Bench 显示视觉分数与执行成功率脱钩——**当「看起来好」越来越容易时，「哪里不对」的定位能力（评测 + 回流）取代「生成质量」成为数据侧的稀缺环节**。
+
+### A5. 腾讯开源世界模型速查（2026-10-28 核实）
+
+| 项目 | 定位 | 仓库 / 权重 | 在线体验 |
+|---|---|---|---|
+| **Hy-Nomas**（2026-10-23 发布） | 自由形态交互式**视频**世界模型：文本 + 相机轨迹双控制，分段自回归 + lifelong KV cache，Apache 2.0 | [GitHub](https://github.com/Tencent-Hunyuan/Hy-Nomas)（263★）· [HF 权重](https://huggingface.co/tencent/Hy-Nomas) | [官方 demo](https://hy-nomas.hy.tencent.com/demo)（需注册）；本地 Reactor runtime 见仓库 `reactor/` |
+| **HY-World 2.0**（2026-04） | 多模态 **3D** 世界模型：全景生成 → 轨迹规划 → 世界扩展 → 合成，输出 3DGS/mesh，可漫游带物理碰撞 | [GitHub](https://github.com/Tencent-Hunyuan/HY-World-2.0)（2.8k★）· WorldMirror-2（~1.2B）、HY-Pano-2（~80B）权重已开 | 产品页可免费试用 |
+| **HunyuanWorld-1.0**（2025-07） | 文本/图像 → 可交互沉浸式 3D 世界，可导出 mesh 供 CG 管线使用 | [GitHub](https://github.com/Tencent-Hunyuan/HunyuanWorld-1.0)（3.0k★） | 混元 3D 创作引擎 |
+
+**为什么这对数据岗重要**：Hy-Nomas 是第一个「代码 + 权重 + 训练与标注流程」全开、且能在单张 4090 上跑的交互式世界模型。它让「生成 → 打分 → 定位缺陷 → 回流标注」这条闭环**第一次可以脱离封闭 API 在本地复现、版本化、做回归**——这正是本套件想标准化的流程。
+
+完整上手与评测设计见 [`open_models/hy-nomas_eval_plan.md`](open_models/hy-nomas_eval_plan.md)（含 Docker / 单卡两种路径、Reactor 本地交互步骤、四条评测任务设计）。
