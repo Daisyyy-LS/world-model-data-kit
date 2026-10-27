@@ -2,6 +2,11 @@
   "clip_id": "A-01-room-revisit",
   "scenario": "室内房间交互：放置物体 → 离开 → 30 秒后返回",
   "duration_sec": 42,
+  "sample_type": "synthetic_demo",
+  "source_note": "人工构造的示意计数，用于演示评分流程；非模型生成结果，所有指标均未实测。",
+  "model": null,
+  "run_metadata": null,
+  "review_metadata": {"annotator_id": "example-only", "guide_version": "draft-0.2", "confidence": "not_assessed"},
   "revisit": {
     "n_revisits": 3,
     "checked_elements": 40,
@@ -13,22 +18,28 @@
   },
   "physics": {
     "frames_checked": 240,
-    "violations": ["杯子与桌面轻微穿模", "窗帘飘动方向逆风"]
+    "violations": [
+      {"type": "杯子与桌面轻微穿模", "time_start_sec": 12.4, "time_end_sec": 12.9},
+      {"type": "窗帘飘动方向与环境风向不一致", "time_start_sec": 23.0, "time_end_sec": 25.2}
+    ]
   },
   "camera": {
     "instruction": "以中景从左向右缓慢环绕沙发",
     "trajectory_error_px": 8,
-    "max_tolerated_px": 20
+    "max_tolerated_px": 20,
+    "frame_width_px": 1280
   },
   "instruction_following": {
     "n_instructions": 5,
     "n_failed": 0
   },
   "interaction": {
-    "p95_latency_ms": 610
+    "p95_latency_ms": 610,
+    "latency_target_ms": 300,
+    "environment_note": "仅为示意目标；未定义硬件/负载，不可跨环境比较"
   },
   "memory": {
-    "n_steps": 3,
+    "n_checkpoints": 3,
     "recall_correct": 2
   },
   "editability": {

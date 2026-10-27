@@ -2,6 +2,11 @@
   "clip_id": "B-02-cinematic-shot",
   "scenario": "影视分镜预演：给定景别与运镜指令生成 8 秒镜头",
   "duration_sec": 8,
+  "sample_type": "synthetic_demo",
+  "source_note": "人工构造的示意计数，用于演示评分流程；非模型生成结果，所有指标均未实测。",
+  "model": null,
+  "run_metadata": null,
+  "review_metadata": {"annotator_id": "example-only", "guide_version": "draft-0.2", "confidence": "not_assessed"},
   "not_applicable": ["latency", "memory"],
   "revisit": {
     "n_revisits": 0,
@@ -19,18 +24,17 @@
   "camera": {
     "instruction": "特写起幅 → 拉至全景，轻微手持感",
     "trajectory_error_px": 7,
-    "max_tolerated_px": 20
+    "max_tolerated_px": 20,
+    "frame_width_px": 1280
   },
   "instruction_following": {
     "n_instructions": 3,
     "n_failed": 0
   },
   "interaction": {
-    "p95_latency_ms": 999
-  },
-  "memory": {
-    "n_steps": 0,
-    "recall_correct": 0
+    "p95_latency_ms": 999,
+    "latency_target_ms": 300,
+    "environment_note": "N/A 维度；该占位值不会参与评分"
   },
   "editability": {
     "local_edits": 3,

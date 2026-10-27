@@ -1,58 +1,122 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-world-model eval kit · score.py
---------------------------------
-世界模型 / 交互视频生成结果的 8 维打分器，并把评测结果翻译成数据采集动作。
+"""Exploratory evaluator for manually observed world-model sample metadata.
 
-设计出发点（也是这个仓库想表达的产品观点）：
-    评测不应该止于打个分。一条样本的失败维度，应当直接指向
-    "它属于哪一层数据、下次采集要补什么标注"。
-    否则评测集和训练集是两张皮，badcase 永远沉淀不下来。
-
-用法：
-    python score.py samples/clip_A_interactive.json
-    python score.py samples/clip_A_interactive.json --json
-    python score.py samples/clip_A_interactive.json --markdown out.md
-
-只依赖 Python 标准库。
+This script does not inspect video or evaluate a model. Missing measurements are
+reported as unscored; they are never silently treated as successful outcomes.
+The score bands are an uncalibrated prototype profile and must not be used as a
+benchmark or release gate.
 """
 
 import argparse
 import json
+import math
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
 
-
-# ---------------------------------------------------------------- 维度定义
 
 @dataclass
 class Dimension:
     key: str
     name: str
-    weight: float                     # 总评权重
-    desc: str                         # 这一维在测什么
-    failure_hint: str                 # 典型失败形态
-    layer: str                        # 失败时应回流到的数据层
-    action: str                       # 对应的采集 / 标注动作
-    score_fn: Callable[[dict], Tuple[float, str]] = field(repr=False, default=None)
+    description: str
+    failure_hint: str
+    stage: str
+    action: str
+    score_fn: Callable[[dict], Optional[Tuple[float, str]]]
 
 
-def _safe(d: Optional[dict]) -> dict:
-    return d if isinstance(d, dict) else {}
+def _obj(clip: dict, key: str) -> dict:
+    value = clip.get(key)
+    return value if isinstance(value, dict) else {}
 
 
-def _ratio(num: float, den: float) -> float:
-    """安全除法：分母为 0 时视为无失败。"""
-    return 0.0 if not den else num / den
+def _number(value, label: str, *, minimum: float = 0) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{label} 必须是数字")
+    value = float(value)
+    if not math.isfinite(value) or value < minimum:
+        raise ValueError(f"{label} 必须是有限且不小于 {minimum} 的数字")
+    return value
+
+
+def _count(obj: dict, key: str, label: str) -> Optional[int]:
+    if key not in obj:
+        return None
+    value = obj[key]
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ValueError(f"{label} 必须是非负整数")
+    return value
+
+
+def validate_clip(clip: dict) -> None:
+    if not isinstance(clip, dict):
+        raise ValueError("输入 JSON 顶层必须是对象")
+    for key in ("clip_id", "scenario"):
+        if not isinstance(clip.get(key), str) or not clip[key].strip():
+            raise ValueError(f"缺少必填文本字段：{key}")
+    _number(clip.get("duration_sec"), "duration_sec", minimum=0.001)
+    sample_type = clip.get("sample_type")
+    if not isinstance(sample_type, str) or sample_type not in {"synthetic_demo", "model_output", "human_authored"}:
+        raise ValueError("sample_type 必须是 synthetic_demo、model_output 或 human_authored")
+    if sample_type == "model_output":
+        required_objects = {
+            "model": {"name", "version"},
+            "run_metadata": {"generated_at", "prompt_version", "environment", "parameters", "seed"},
+            "source_metadata": {"asset_id", "authorization_status", "sensitivity"},
+            "review_metadata": {"annotator_id", "task_card_version", "confidence", "adjudication_state"},
+        }
+        for key, fields in required_objects.items():
+            value = clip.get(key)
+            if not isinstance(value, dict) or not fields.issubset(value):
+                missing = ", ".join(sorted(fields - set(value or {}))) if isinstance(value, dict) else ", ".join(sorted(fields))
+                raise ValueError(f"model_output 样本必须提供 {key} 对象及字段：{missing}；未知值可明确填 null")
+    na = clip.get("not_applicable", [])
+    known = {"consistency", "permanence", "physics", "camera", "instruction", "latency", "memory", "editability"}
+    if not isinstance(na, list) or any(not isinstance(x, str) for x in na):
+        raise ValueError("not_applicable 必须是维度 key 数组")
+    unknown = set(na) - known
+    if unknown:
+        raise ValueError("未知 not_applicable 维度：" + ", ".join(sorted(unknown)))
+
+    # Validate any supplied counts and internal relationships before scoring.
+    for section, num_key, den_key in [
+        ("revisit", "static_element_mismatch", "checked_elements"),
+        ("object_permanence", "attr_changed_after_occlusion", "occluded_objects"),
+        ("instruction_following", "n_failed", "n_instructions"),
+        ("editability", "inconsistent_after_edit", "local_edits"),
+        ("memory", "recall_correct", "n_checkpoints"),
+    ]:
+        data = _obj(clip, section)
+        n = _count(data, num_key, f"{section}.{num_key}")
+        d = _count(data, den_key, f"{section}.{den_key}")
+        if n is not None and d is not None and n > d:
+            raise ValueError(f"{section}.{num_key} 不能大于 {den_key}")
+    physics = _obj(clip, "physics")
+    _count(physics, "frames_checked", "physics.frames_checked")
+    if "violations" in physics and not isinstance(physics["violations"], list):
+        raise ValueError("physics.violations 必须是数组")
+    for index, violation in enumerate(physics.get("violations", [])):
+        if not isinstance(violation, dict) or not isinstance(violation.get("type"), str):
+            raise ValueError(f"physics.violations[{index}] 必须是含 type 的对象")
+        start = _number(violation.get("time_start_sec"), f"physics.violations[{index}].time_start_sec")
+        end = _number(violation.get("time_end_sec"), f"physics.violations[{index}].time_end_sec")
+        if end < start or end > float(clip["duration_sec"]):
+            raise ValueError(f"physics.violations[{index}] 时间范围无效")
+    camera = _obj(clip, "camera")
+    for key in ("trajectory_error_px", "max_tolerated_px", "frame_width_px"):
+        if key in camera:
+            _number(camera[key], f"camera.{key}", minimum=0.001 if key != "trajectory_error_px" else 0)
+    interaction = _obj(clip, "interaction")
+    for key in ("p95_latency_ms", "latency_target_ms"):
+        if key in interaction:
+            _number(interaction[key], f"interaction.{key}", minimum=0.001 if key == "latency_target_ms" else 0)
 
 
 def _band(rate: float, good: float, ok: float, fair: float, poor: float) -> float:
-    """
-    把「失败率」映射到 0-5 分。
-    rate <= good  -> 5 分；每越过一档降 1 分；>= poor -> 1 分。
-    """
+    """Exploratory 1–5 ordinal band; thresholds are not empirically calibrated."""
     if rate <= good:
         return 5.0
     if rate <= ok:
@@ -64,289 +128,193 @@ def _band(rate: float, good: float, ok: float, fair: float, poor: float) -> floa
     return 1.0
 
 
-DIMENSIONS: List[Dimension] = [
-    Dimension(
-        key="consistency", name="时空一致性",
-        weight=1.4, desc="同一场景多次回访，静态元素是否稳定",
-        failure_hint="墙上的画，第二次进去变了",
-        layer="L1 结构化标注",
-        action="补跨帧静态元素（家具/装饰/光照）的持久 ID 与属性快照",
-        score_fn=lambda c: (
-            _band(_ratio(_safe(c.get("revisit")).get("static_element_mismatch", 0),
-                         _safe(c.get("revisit")).get("checked_elements", 0)),
-                  0.0, 0.03, 0.10, 0.25),
-            f"回访 {_safe(c.get('revisit')).get('n_revisits', 0)} 次，"
-            f"静态元素错配率 {_ratio(_safe(c.get('revisit')).get('static_element_mismatch', 0), _safe(c.get('revisit')).get('checked_elements', 0)):.1%}",
-        ),
-    ),
-    Dimension(
-        key="permanence", name="物体恒存",
-        weight=1.3, desc="物体被遮挡后再出现，属性是否保持一致",
-        failure_hint="藏起来的杯子回来变成别的颜色",
-        layer="L1 结构化标注",
-        action="补遮挡前后同一物体的 ID 对齐与属性（颜色/形状/位置）标注",
-        score_fn=lambda c: (
-            _band(_ratio(_safe(c.get("object_permanence")).get("attr_changed_after_occlusion", 0),
-                         _safe(c.get("object_permanence")).get("occluded_objects", 0)),
-                  0.0, 0.05, 0.15, 0.30),
-            f"遮挡物体 {_safe(c.get('object_permanence')).get('occluded_objects', 0)} 个，"
-            f"属性漂移 {_safe(c.get('object_permanence')).get('attr_changed_after_occlusion', 0)} 个",
-        ),
-    ),
-    Dimension(
-        key="physics", name="物理合理性",
-        weight=1.2, desc="碰撞、支撑、流体等是否符合直觉",
-        failure_hint="杯子穿过桌面",
-        layer="L1 结构化标注 + L3 失败样本",
-        action="把穿模/失重样本打为 hard negative，标注违反的物理类别",
-        score_fn=lambda c: (
-            _band(_ratio(len(_safe(c.get("physics")).get("violations", [])),
-                         max(_safe(c).get("duration_sec", 0) / 10.0, 1.0)),
-                  0.0, 0.25, 0.60, 1.20),
-            f"检查 {_safe(c.get('physics')).get('frames_checked', 0)} 帧，"
-            f"违反 {len(_safe(c.get('physics')).get('violations', []))} 处",
-        ),
-    ),
-    Dimension(
-        key="camera", name="相机控制精度",
-        weight=1.1, desc="给定运镜指令，实际轨迹与指令的偏差",
-        failure_hint="「左移环绕」做成了平移",
-        layer="L2 交互轨迹",
-        action="补 (运镜指令, 实际相机轨迹) 配对数据，含景别与轴线标签",
-        score_fn=lambda c: (
-            _band(_ratio(_safe(c.get("camera")).get("trajectory_error_px", 0),
-                         _safe(c.get("camera")).get("max_tolerated_px", 20)),
-                  0.25, 0.50, 0.85, 1.20),
-            f"轨迹误差 {_safe(c.get('camera')).get('trajectory_error_px', 0)}px "
-            f"/ 容差 {_safe(c.get('camera')).get('max_tolerated_px', 20)}px",
-        ),
-    ),
-    Dimension(
-        key="instruction", name="动作 / 指令跟随",
-        weight=1.2, desc="自然语言或动作指令是否被正确执行",
-        failure_hint="「把门打开」没被执行",
-        layer="L2 交互轨迹",
-        action="补指令—执行结果的人工判定对，未执行的进 L3 归因为「指令未落地」",
-        score_fn=lambda c: (
-            _band(_ratio(_safe(c.get("instruction_following")).get("n_failed", 0),
-                         _safe(c.get("instruction_following")).get("n_instructions", 0)),
-                  0.0, 0.10, 0.25, 0.45),
-            f"指令 {_safe(c.get('instruction_following')).get('n_instructions', 0)} 条，"
-            f"未执行 {_safe(c.get('instruction_following')).get('n_failed', 0)} 条",
-        ),
-    ),
-    Dimension(
-        key="latency", name="交互延迟",
-        weight=0.9, desc="从输入动作到画面响应的端到端时延",
-        failure_hint="超过 300ms 就失去交互感",
-        layer="L2 交互轨迹",
-        action="采集时记录每步 action 的时间戳与响应延迟，作为独立字段进入训练集",
-        score_fn=lambda c: (
-            _band(_safe(c.get("interaction")).get("p95_latency_ms", 999) / 300.0,
-                  0.6, 1.0, 1.6, 2.5),
-            f"P95 延迟 {_safe(c.get('interaction')).get('p95_latency_ms', 999)}ms（基准 300ms）",
-        ),
-    ),
-    Dimension(
-        key="memory", name="长时记忆与因果",
-        weight=1.3, desc="多步操作后，能否回溯前序状态与因果链",
-        failure_hint="第三步时忘了第一步挪过椅子",
-        layer="L3 偏好与失败样本",
-        action="构造多步任务链并标注「关键状态记忆点」，失败链整条入库而非单帧",
-        score_fn=lambda c: (
-            _band(_ratio(_safe(c.get("memory")).get("n_steps", 0) - _safe(c.get("memory")).get("recall_correct", 0),
-                         _safe(c.get("memory")).get("n_steps", 0)),
-                  0.0, 0.20, 0.40, 0.65),
-            f"{_safe(c.get('memory')).get('n_steps', 0)} 步任务链，"
-            f"正确回溯 {_safe(c.get('memory')).get('recall_correct', 0)} 步",
-        ),
-    ),
-    Dimension(
-        key="editability", name="局部可编辑性",
-        weight=0.8, desc="局部重绘后，周边光影与几何是否保持一致",
-        failure_hint="改了沙发，地板光影穿帮",
-        layer="L1 结构化标注",
-        action="补「编辑前 / 编辑后」成对样本 + 遮罩区域标注，用于训练局部一致性",
-        score_fn=lambda c: (
-            _band(_ratio(_safe(c.get("editability")).get("inconsistent_after_edit", 0),
-                         _safe(c.get("editability")).get("local_edits", 0)),
-                  0.0, 0.15, 0.35, 0.55),
-            f"局部编辑 {_safe(c.get('editability')).get('local_edits', 0)} 处，"
-            f"周边穿帮 {_safe(c.get('editability')).get('inconsistent_after_edit', 0)} 处",
-        ),
-    ),
+def _rate_dimension(section: str, numerator: str, denominator: str, name: str,
+                    thresholds: Tuple[float, float, float, float], unit: str = "失败率"):
+    def score(clip: dict):
+        data = _obj(clip, section)
+        n = _count(data, numerator, f"{section}.{numerator}")
+        d = _count(data, denominator, f"{section}.{denominator}")
+        if n is None or d is None or d == 0:
+            return None
+        rate = n / d
+        return _band(rate, *thresholds), f"{n}/{d} {unit} = {rate:.1%}"
+    return score
+
+
+def _physics(clip: dict):
+    data = _obj(clip, "physics")
+    frames = _count(data, "frames_checked", "physics.frames_checked")
+    violations = data.get("violations")
+    if frames is None or frames == 0 or violations is None:
+        return None
+    rate = len(violations) / frames * 100
+    return _band(rate, 0.0, 0.25, 0.6, 1.2), f"{len(violations)} 条违反 / {frames} 帧 = {rate:.2f} 条/100帧"
+
+
+def _camera(clip: dict):
+    data = _obj(clip, "camera")
+    needed = ("trajectory_error_px", "max_tolerated_px", "frame_width_px")
+    if any(k not in data for k in needed):
+        return None
+    error = float(data["trajectory_error_px"])
+    tolerance = float(data["max_tolerated_px"])
+    width = float(data["frame_width_px"])
+    normalized_error = error / width
+    normalized_tolerance = tolerance / width
+    ratio = normalized_error / normalized_tolerance
+    return _band(ratio, 0.25, 0.50, 0.85, 1.20), (
+        f"轨迹误差 {error:g}px/{width:g}px 画幅，容差 {tolerance:g}px；"
+        f"误差/容差={ratio:.2f}（探索性分档）")
+
+
+def _latency(clip: dict):
+    data = _obj(clip, "interaction")
+    if "p95_latency_ms" not in data or "latency_target_ms" not in data:
+        return None
+    actual = float(data["p95_latency_ms"])
+    target = float(data["latency_target_ms"])
+    ratio = actual / target
+    return _band(ratio, 0.6, 1.0, 1.6, 2.5), (
+        f"P95 {actual:g}ms / 本任务目标 {target:g}ms = {ratio:.2f}；"
+        "目标需按产品场景与运行环境设定")
+
+
+def _memory(clip: dict):
+    data = _obj(clip, "memory")
+    steps = _count(data, "n_checkpoints", "memory.n_checkpoints")
+    correct = _count(data, "recall_correct", "memory.recall_correct")
+    if steps is None or correct is None or steps == 0:
+        return None
+    error = (steps - correct) / steps
+    return _band(error, 0.0, 0.20, 0.40, 0.65), f"{correct}/{steps} 个状态回溯点正确；错误率 {error:.1%}"
+
+
+DIMENSIONS = [
+    Dimension("consistency", "时空一致性", "回访时静态元素是否保持", "房间回访后布局漂移", "L1", "补静态元素持久 ID 与属性快照", _rate_dimension("revisit", "static_element_mismatch", "checked_elements", "", (0.0, .03, .10, .25), "错配率")),
+    Dimension("permanence", "物体恒存", "遮挡后物体身份与属性是否保持", "杯子重新出现后颜色改变", "L1", "补遮挡前后物体 ID 与属性标注", _rate_dimension("object_permanence", "attr_changed_after_occlusion", "occluded_objects", "", (0.0, .05, .15, .30), "漂移率")),
+    Dimension("physics", "物理合理性", "碰撞、支撑等可观察违反", "物体穿透桌面", "L1 + 经复核后 L3", "记录违反类别和证据片段；复核后再决定学习用途", _physics),
+    Dimension("camera", "相机控制精度", "运镜轨迹相对指令的偏差", "环绕指令被执行为平移", "L2", "记录指令、参考轨迹、实际轨迹和画幅", _camera),
+    Dimension("instruction", "动作 / 指令跟随", "指令是否按任务条件执行", "打开门的动作未改变门状态", "L2", "补指令—结果配对及失败原因", _rate_dimension("instruction_following", "n_failed", "n_instructions", "", (0.0, .10, .25, .45), "失败率")),
+    Dimension("latency", "交互延迟", "动作输入到响应的端到端时延", "响应时延超过场景目标", "L2", "记录硬件、负载、计时边界和时延分布", _latency),
+    Dimension("memory", "长时记忆与因果", "多步操作后关键状态是否可回溯", "后续操作使用旧状态", "L2；经复核后可进入 L3", "保留完整动作链与关键状态检查点", _memory),
+    Dimension("editability", "局部可编辑性", "局部修改后非编辑区域是否稳定", "修改沙发导致周边光影变化", "L1", "补编辑前后样本、遮罩与变化区域", _rate_dimension("editability", "inconsistent_after_edit", "local_edits", "", (0.0, .15, .35, .55), "周边不一致率")),
 ]
+PASS_LINE = 3.5  # Exploratory triage threshold only; not a model release criterion.
 
-PASS_LINE = 3.5   # 单维低于此分视为需要回流
-
-
-# ---------------------------------------------------------------- 打分
 
 @dataclass
 class Row:
     dim: Dimension
-    score: Optional[float]   # None 表示该维度对本样本不适用（N/A）
+    score: Optional[float]
     note: str
 
     @property
-    def need_fix(self) -> bool:
+    def need_review(self) -> bool:
         return self.score is not None and self.score < PASS_LINE
 
-    @property
-    def priority(self) -> float:
-        """缺口越大、权重越高，越优先处理。"""
-        if self.score is None:
-            return 0.0
-        return (PASS_LINE - max(self.score, 0.0)) * self.dim.weight
 
-
-def evaluate(clip: dict) -> Tuple[List[Row], float]:
-    na = set(clip.get("not_applicable", []) or [])
+def evaluate(clip: dict) -> Tuple[List[Row], dict]:
+    validate_clip(clip)
+    na = set(clip.get("not_applicable", []))
     rows = []
     for dim in DIMENSIONS:
         if dim.key in na:
-            rows.append(Row(dim=dim, score=None, note="本任务类型不适用（N/A）"))
+            rows.append(Row(dim, None, "任务设计声明为 N/A"))
             continue
-        score, note = dim.score_fn(clip)
-        score = max(0.0, min(5.0, float(score)))
-        rows.append(Row(dim=dim, score=score, note=note))
-    counted = [r for r in rows if r.score is not None]
-    total_weight = sum(r.dim.weight for r in counted)
-    weighted = sum(r.score * r.dim.weight for r in counted)
-    return rows, (weighted / total_weight if total_weight else 0.0)
+        result = dim.score_fn(clip)
+        if result is None:
+            rows.append(Row(dim, None, "未评：缺少足够的观测字段或有效分母"))
+        else:
+            score, note = result
+            rows.append(Row(dim, max(1.0, min(5.0, float(score))), note))
+    applicable = len(rows) - len(na)
+    measured = sum(r.score is not None for r in rows)
+    coverage = measured / applicable if applicable else 0.0
+    return rows, {"measured": measured, "applicable": applicable,
+                  "coverage": coverage,
+                  "below_exploratory_review_line": sum(r.need_review for r in rows)}
 
 
-def overall_label(score: float) -> str:
-    if score >= 4.3:
-        return "高质量，可进入试点"
-    if score >= 3.5:
-        return "可用，但需针对弱项补数据"
-    if score >= 2.5:
-        return "暂不适合交互场景"
-    return "不建议进入评测"
+def _sample_label(clip: dict) -> str:
+    return {"synthetic_demo": "合成示意样本（非模型输出）",
+            "model_output": "真实模型输出（须核对运行元信息）",
+            "human_authored": "人工构造样本（非模型输出）"}[clip["sample_type"]]
 
 
-# ---------------------------------------------------------------- 输出
-
-def render_text(clip: dict, rows: List[Row], total: float) -> str:
-    name = clip.get("clip_id", "unknown")
-    scenario = clip.get("scenario", "-")
-    dur = clip.get("duration_sec", "-")
-
-    lines = []
-    lines.append("=" * 68)
-    lines.append(f"世界模型输出评测卡 · {name}")
-    lines.append(f"场景：{scenario}    时长：{dur}s")
-    lines.append("=" * 68)
-    lines.append(f"{'维度':<14}{'得分':<7}{'权重':<7}{'证据 / 说明'}")
-    lines.append("-" * 68)
-    for r in rows:
-        if r.score is None:
-            lines.append(f"{r.dim.name:<12}{'N/A':>5}{'':<3}{r.dim.weight:>6.1f}   {r.note}")
-            continue
-        flag = " ⚠" if r.need_fix else "  "
-        lines.append(f"{r.dim.name:<12}{r.score:>4.1f}{flag}{r.dim.weight:>6.1f}   {r.note}")
-    lines.append("-" * 68)
-    lines.append(f"加权总分：{total:.2f} / 5.00    →  {overall_label(total)}")
-    lines.append("")
-
-    bad = sorted([r for r in rows if r.need_fix], key=lambda r: -r.priority)
-    if not bad:
-        lines.append("回流建议：全部维度达标，该样本可作为 positive 进入 L3 偏好对的 chosen 侧。")
+def render_text(clip: dict, rows: List[Row], summary: dict) -> str:
+    lines = ["=" * 78, f"评测记录 · {clip['clip_id']}",
+             f"来源类型：{_sample_label(clip)}",
+             f"场景：{clip['scenario']}    时长：{clip['duration_sec']}s",
+             "分数用途：探索性分档，阈值未校准；不得用于模型排名或发布门禁。", "=" * 78,
+             f"{'维度':<16}{'分数':<9}{'证据 / 状态'}", "-" * 78]
+    for row in rows:
+        score = "未评" if row.score is None else f"{row.score:.1f}" + (" · 复核" if row.need_review else "")
+        lines.append(f"{row.dim.name:<16}{score:<9}{row.note}")
+    pct = f"{summary['coverage']:.0%}" if summary["applicable"] else "N/A"
+    lines += ["-" * 78, f"覆盖率：{summary['measured']}/{summary['applicable']} 个适用维度已评（{pct}）",
+              f"低于探索性复核线的已测维度：{summary['below_exploratory_review_line']} 项",
+              "说明：不计算跨维度总分或平均分。探索性复核线未校准，不是质量门禁。", "",
+              "需复核项："]
+    bad = [r for r in rows if r.need_review]
+    if bad:
+        for row in bad:
+            lines.append(f"- {row.dim.name}（{row.score:.1f}）：{row.dim.failure_hint}；建议阶段：{row.dim.stage}；建议：{row.dim.action}")
     else:
-        lines.append(f"回流建议：{len(bad)} 个维度低于 {PASS_LINE} 分，按优先级处理——")
-        lines.append("")
-        for i, r in enumerate(bad, 1):
-            lines.append(f"{i}. 【{r.dim.name}】{r.score:.1f} 分（优先级 {r.priority:.2f}）")
-            lines.append(f"   失败形态：{r.dim.failure_hint}")
-            lines.append(f"   回流层　：{r.dim.layer}")
-            lines.append(f"   采集动作：{r.dim.action}")
-            lines.append("")
-        worst = bad[0]
-        lines.append(f"本条样本主归因：【{worst.dim.name}】，建议整条入库为 "
-                     f"hard negative，而非截取单帧。")
-    lines.append("=" * 68)
+        lines.append("- 无已测维度低于探索性复核线；这不等于样本通过质量门禁。")
+    lines.append("=" * 78)
     return "\n".join(lines)
 
 
-def render_markdown(clip: dict, rows: List[Row], total: float) -> str:
-    name = clip.get("clip_id", "unknown")
-    bad = sorted([r for r in rows if r.need_fix], key=lambda r: -r.priority)
-    md = [f"## 评测卡 · {name}", "",
-          f"- 场景：{clip.get('scenario', '-')}｜时长：{clip.get('duration_sec', '-')}s",
-          f"- **加权总分：{total:.2f} / 5.00** → {overall_label(total)}", "",
-          "| 维度 | 得分 | 权重 | 说明 |", "|---|---:|---:|---|"]
-    for r in rows:
-        mark = " ⚠️" if r.need_fix else ""
-        cell = "N/A" if r.score is None else f"{r.score:.1f}"
-        md.append(f"| {r.dim.name}{mark} | {cell} | {r.dim.weight} | {r.note} |")
-    md.append("")
-    if bad:
-        md.append("### 数据回流建议")
-        md.append("")
-        for r in bad:
-            md.append(f"- **{r.dim.name}**（{r.score:.1f}）→ 回流 `{r.dim.layer}`：{r.dim.action}")
-    else:
-        md.append("### 数据回流建议")
-        md.append("")
-        md.append("- 全部维度达标，可作为 L3 偏好对的 chosen 侧样本。")
-    return "\n".join(md)
-
-
-def render_json(clip: dict, rows: List[Row], total: float) -> str:
+def render_json(clip: dict, rows: List[Row], summary: dict) -> str:
     payload = {
-        "clip_id": clip.get("clip_id", "unknown"),
-        "scenario": clip.get("scenario"),
-        "total_score": round(total, 3),
-        "verdict": overall_label(total),
-        "dimensions": [
-            {
-                "key": r.dim.key, "name": r.dim.name,
-                "score": None if r.score is None else round(r.score, 2),
-                "weight": r.dim.weight, "evidence": r.note, "need_fix": r.need_fix,
-            }
-            for r in rows
-        ],
-        "data_actions": [
-            {"dimension": r.dim.name, "layer": r.dim.layer, "action": r.dim.action,
-             "priority": round(r.priority, 3)}
-            for r in sorted([r for r in rows if r.need_fix], key=lambda r: -r.priority)
-        ],
+        "clip_id": clip["clip_id"], "scenario": clip["scenario"],
+        "duration_sec": clip["duration_sec"], "not_applicable": clip.get("not_applicable", []),
+        "sample_type": clip["sample_type"], "source_note": clip.get("source_note"),
+        "model": clip.get("model"), "run_metadata": clip.get("run_metadata"),
+        "source_metadata": clip.get("source_metadata"),
+        "review_metadata": clip.get("review_metadata"),
+        "summary": {**summary, "threshold_profile": "prototype-uncalibrated-v0",
+                    "interpretation": "仅展示观测覆盖和待复核维度；不计算整体质量分"},
+        "dimensions": [{"key": r.dim.key, "name": r.dim.name, "status": "not_applicable" if r.dim.key in clip.get("not_applicable", []) else ("unscored" if r.score is None else "scored"),
+                        "score": r.score, "evidence": r.note, "needs_review": r.need_review,
+                        "suggested_data_stage": r.dim.stage if r.need_review else None,
+                        "suggested_action": r.dim.action if r.need_review else None} for r in rows],
     }
     return json.dumps(payload, ensure_ascii=False, indent=2)
 
 
-# ---------------------------------------------------------------- CLI
+def render_markdown(clip: dict, rows: List[Row], summary: dict) -> str:
+    lines = [f"## 评测记录 · {clip['clip_id']}", "", f"- 来源类型：{_sample_label(clip)}",
+             f"- 场景：{clip['scenario']}；时长：{clip['duration_sec']}s",
+             f"- 覆盖率：{summary['measured']}/{summary['applicable']} 个适用维度",
+             "- 解释限制：探索性维度分档，尚未校准，不用于模型排名或发布门禁。", "",
+             "| 维度 | 状态 | 分数 | 证据 | 建议阶段 | 建议动作 |", "|---|---|---:|---|---|---|"]
+    for row in rows:
+        status = "N/A" if row.dim.key in clip.get("not_applicable", []) else ("未评" if row.score is None else ("待复核" if row.need_review else "已评"))
+        score = "" if row.score is None else f"{row.score:.1f}"
+        lines.append(f"| {row.dim.name} | {status} | {score} | {row.note} | {row.dim.stage if row.need_review else ''} | {row.dim.action if row.need_review else ''} |")
+    return "\n".join(lines)
+
 
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(
-        description="世界模型输出 8 维打分器：把评测结果翻译成数据采集动作")
-    ap.add_argument("input", help="生成结果元信息 JSON 路径")
-    ap.add_argument("--json", action="store_true", help="以 JSON 输出")
-    ap.add_argument("--markdown", metavar="PATH", help="额外输出一份 Markdown 评测卡")
-    args = ap.parse_args(argv)
-
+    parser = argparse.ArgumentParser(description="对人工观测的世界模型样本元数据做探索性分档")
+    parser.add_argument("input", help="样本元信息 JSON 路径")
+    parser.add_argument("--json", action="store_true", help="以 JSON 输出")
+    parser.add_argument("--markdown", metavar="PATH", help="额外输出 Markdown 记录")
+    args = parser.parse_args(argv)
     try:
-        with open(args.input, "r", encoding="utf-8") as f:
-            clip = json.load(f)
+        clip = json.loads(Path(args.input).read_text(encoding="utf-8"))
+        rows, summary = evaluate(clip)
     except FileNotFoundError:
-        print(f"[错误] 找不到输入文件：{args.input}")
+        print(f"[错误] 找不到输入文件：{args.input}", file=sys.stderr)
         return 2
-    except json.JSONDecodeError as e:
-        print(f"[错误] JSON 解析失败：{e}")
+    except (json.JSONDecodeError, ValueError) as exc:
+        print(f"[输入错误] {exc}", file=sys.stderr)
         return 2
-
-    rows, total = evaluate(clip)
-
-    if args.json:
-        print(render_json(clip, rows, total))
-    else:
-        print(render_text(clip, rows, total))
-
+    print(render_json(clip, rows, summary) if args.json else render_text(clip, rows, summary))
     if args.markdown:
-        with open(args.markdown, "w", encoding="utf-8") as f:
-            f.write(render_markdown(clip, rows, total))
-        print(f"\n已写入 Markdown 评测卡：{args.markdown}")
+        Path(args.markdown).write_text(render_markdown(clip, rows, summary), encoding="utf-8")
+        print(f"\n已写入 Markdown 评测记录：{args.markdown}")
     return 0
 
 

@@ -1,47 +1,75 @@
-# 输入 Schema
+# 输入 Schema 与解释口径
 
-`score.py` 读入一段生成结果的**元信息**（不是视频本身）。设计原则：字段应当是**评测时能被人工或自动稳定观测到的量**，而不是主观感受。
+`score.py` 只读取人工或规则整理的观测元数据，不读取视频、不调用模型，也不验证标注真值。当前评分阈值是探索性占位规则，尚未通过专家校准或多人标注实验；输出不能用作模型排名、发布门禁或“模型质量”结论。
 
-## 顶层字段
+## 必填字段
 
-| 字段 | 类型 | 必填 | 说明 |
-|---|---|---|---|
-| `clip_id` | string | 是 | 样本唯一 ID，建议编码为 `任务类型-序号-场景名` |
-| `scenario` | string | 是 | 一句话描述这个 clip 在测什么 |
-| `duration_sec` | number | 是 | 时长（秒），用于把物理量归一化为「每 10 秒违反数」 |
-| `not_applicable` | string[] | 否 | 本任务类型不适用的维度 key，如影视镜头填 `["latency","memory"]`。这些维度计为 N/A，不进加权 |
-| `revisit` | object | 否 | 时空一致性证据 |
-| `object_permanence` | object | 否 | 物体恒存证据 |
-| `physics` | object | 否 | 物理合理性证据 |
-| `camera` | object | 否 | 相机控制精度证据 |
-| `instruction_following` | object | 否 | 指令跟随证据 |
-| `interaction` | object | 否 | 交互延迟证据 |
-| `memory` | object | 否 | 长时记忆证据 |
-| `editability` | object | 否 | 局部可编辑性证据 |
-
-缺失的字段按「零失败」处理，并在证据栏如实显示——**不会因为漏填而虚高打分**。
-
-## 各维度字段
-
-| 维度 key | 子字段 | 含义 |
+| 字段 | 类型 | 说明 |
 |---|---|---|
-| `consistency` | `revisit.n_revisits` / `checked_elements` / `static_element_mismatch` | 回访次数、被检查的静态元素数、其中发生错配的数量 |
-| `permanence` | `object_permanence.occluded_objects` / `attr_changed_after_occlusion` | 被遮挡物体数、遮挡后属性发生漂移的数量 |
-| `physics` | `physics.frames_checked` / `violations[]` | 检查帧数、违反项列表（每条一句话） |
-| `camera` | `camera.instruction` / `trajectory_error_px` / `max_tolerated_px` | 运镜指令、实际轨迹与指令的偏差像素、可接受上限 |
-| `instruction` | `instruction_following.n_instructions` / `n_failed` | 指令总数、未被执行的数量 |
-| `latency` | `interaction.p95_latency_ms` | 端到端响应时延 P95（毫秒），基准 300ms |
-| `memory` | `memory.n_steps` / `recall_correct` | 任务链步数、能被正确回溯的步数 |
-| `editability` | `editability.local_edits` / `inconsistent_after_edit` | 局部编辑次数、编辑后周边穿帮次数 |
+| `clip_id` | string | 唯一样本 ID |
+| `scenario` | string | 本样本任务和测量目标 |
+| `duration_sec` | number > 0 | 样本时长 |
+| `sample_type` | enum | `synthetic_demo` / `model_output` / `human_authored` |
 
-## 打分口径
+`model_output` 还必须提供 `model`、`run_metadata`、`source_metadata`、`review_metadata` 对象及下表指定的键。无法获得的值应显式填 `null` 并在 `source_note` 说明，不要猜填。这样评测记录能追溯来源、权属状态、运行环境和复核口径；它仍不代表脚本会验证这些元数据的真实性。
 
-- 每个维度先算**失败率**，再映射到 0–5 分（见 `score.py` 里的 `_band`），阈值按「什么样的失败率会让用户出戏」来定，而不是均分。
-- 权重不相等：**一致性、恒存、记忆**权重最高（1.4 / 1.3 / 1.3）——这三项决定「世界是否可信」；可编辑性最低（0.8），它更多是加分项。
-- 低于 **3.5** 分视为需要回流，按 `缺口 × 权重` 排优先级。
+| 对象 | 必须包含的键 |
+|---|---|
+| `model` | `name`、`version` |
+| `run_metadata` | `generated_at`、`prompt_version`、`environment`、`parameters`、`seed` |
+| `source_metadata` | `asset_id`、`authorization_status`、`sensitivity` |
+| `review_metadata` | `annotator_id`、`task_card_version`、`confidence`、`adjudication_state` |
 
-## 已知的局限（想清楚边界，别装作完备）
+示例元信息：
 
-1. 失败率目前靠人工观测填写，**规模化后必须做自动检测**（跨帧特征比对、光流一致性、目标重识别），否则评测成本会反过来卡住数据迭代速度。
-2. 8 个维度不是正交的：一致性差往往连带恒存差，排优先级时会被重复计算，后续应做相关性分析再降维。
-3. 这套 schema 针对**可交互世界**。纯视频生成（如影视镜头预演）请填 `not_applicable`，否则延迟和记忆会被误判为缺陷。
+```json
+{
+  "clip_id": "demo-room-001",
+  "scenario": "房间回访后检查静态元素错配比例",
+  "duration_sec": 42,
+  "sample_type": "synthetic_demo",
+  "source_note": "人工构造的流程示例；不是模型生成结果",
+  "model": null,
+  "run_metadata": null,
+  "review_metadata": {"annotator_id": "reviewer-a", "guide_version": "0.1", "confidence": "medium"}
+}
+```
+
+## 状态必须区分
+
+- **已评**：有明确观测和有效分母，才能计算探索性维度分。
+- **未评**：字段缺失或没有可用观测；不计分，不推断为成功。
+- **N/A**：任务设计明确不包含该能力，在 `not_applicable` 显式列出维度 key。
+- **零失败**：已检查且分母大于 0，观察到失败数为 0。
+
+缺字段与零失败不同。分母为 0、字段不齐或任务没有适用观测时，当前工具返回“未评”。
+
+## 观测字段
+
+| 维度 key | 需要的字段 | 解释 |
+|---|---|---|
+| `consistency` | `revisit.checked_elements`、`static_element_mismatch` | 被检查的静态元素及错配数 |
+| `permanence` | `object_permanence.occluded_objects`、`attr_changed_after_occlusion` | 遮挡物体数及属性漂移数 |
+| `physics` | `physics.frames_checked`、`violations[]` | 检查帧数与人工记录的违反事件对象；每项含 `type`、`time_start_sec`、`time_end_sec`。同一持续事件按一项计数；报告每 100 帧事件数，不等同于客观物理真值 |
+| `camera` | `camera.trajectory_error_px`、`max_tolerated_px`、`frame_width_px` | 误差、任务容差和画幅宽度；采用误差/容差比，仍需统一轨迹定义与对齐算法 |
+| `instruction` | `instruction_following.n_instructions`、`n_failed` | 可判定指令数及失败数 |
+| `latency` | `interaction.p95_latency_ms`、`latency_target_ms` | 实测 P95 与本任务明确配置的目标；同时记录硬件、负载、计时边界和预热策略 |
+| `memory` | `memory.n_checkpoints`、`recall_correct` | 预先定义的状态检查点总数及正确检查数；应保存各检查点明细，不能把动作步数直接当作记忆题数 |
+| `editability` | `editability.local_edits`、`inconsistent_after_edit` | 编辑次数与非编辑区域不一致数 |
+
+计数必须是非负整数，错误数不能超过检查数。`camera` 的误差、容差和画幅单位须一致。`latency_target_ms` 是场景配置而非行业通用常数。
+
+## 分档与汇总
+
+各维度返回 1–5 的**探索性序数分档**。当前分界点未经样本校准，不能解释为等距分数。输出给出覆盖率、未评状态和待复核维度；工具不计算跨维度总分或均值。阈值与复核线需由目标场景、专家口径和试标结果共同确定。
+
+## 两种分类轴，不要混用
+
+**L0–L3 表示数据加工/处理流程的建议阶段**，不是样本的质量等级，也不表示样本类型：
+
+- **L0 原始素材**：来源、授权、脱敏、基础元信息与原始片段。
+- **L1 结构化观测**：对象/相机/事件/状态等有口径的标注。
+- **L2 交互轨迹**：明确的 `(state, action, observation/next_state)` 序列及时间信息。
+- **L3 归因与学习用途**：经复核的失败链、偏好对或 hard negative；必须记录样本用途和证据，不是所有失败都自动进入 L3。
+
+样本类型（如 `positive`、`negative`、`preference_pair`、`trajectory`）应单独记录；一条记录可同时有 L1 标注并被指定为 L3 失败样本。
