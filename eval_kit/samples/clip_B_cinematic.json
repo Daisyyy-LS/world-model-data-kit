@@ -1,0 +1,39 @@
+{
+  "clip_id": "B-02-cinematic-shot",
+  "scenario": "影视分镜预演：给定景别与运镜指令生成 8 秒镜头",
+  "duration_sec": 8,
+  "not_applicable": ["latency", "memory"],
+  "revisit": {
+    "n_revisits": 0,
+    "checked_elements": 25,
+    "static_element_mismatch": 0
+  },
+  "object_permanence": {
+    "occluded_objects": 4,
+    "attr_changed_after_occlusion": 0
+  },
+  "physics": {
+    "frames_checked": 192,
+    "violations": []
+  },
+  "camera": {
+    "instruction": "特写起幅 → 拉至全景，轻微手持感",
+    "trajectory_error_px": 7,
+    "max_tolerated_px": 20
+  },
+  "instruction_following": {
+    "n_instructions": 3,
+    "n_failed": 0
+  },
+  "interaction": {
+    "p95_latency_ms": 999
+  },
+  "memory": {
+    "n_steps": 0,
+    "recall_correct": 0
+  },
+  "editability": {
+    "local_edits": 3,
+    "inconsistent_after_edit": 0
+  }
+}

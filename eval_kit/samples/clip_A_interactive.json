@@ -1,0 +1,38 @@
+{
+  "clip_id": "A-01-room-revisit",
+  "scenario": "室内房间交互：放置物体 → 离开 → 30 秒后返回",
+  "duration_sec": 42,
+  "revisit": {
+    "n_revisits": 3,
+    "checked_elements": 40,
+    "static_element_mismatch": 0
+  },
+  "object_permanence": {
+    "occluded_objects": 6,
+    "attr_changed_after_occlusion": 1
+  },
+  "physics": {
+    "frames_checked": 240,
+    "violations": ["杯子与桌面轻微穿模", "窗帘飘动方向逆风"]
+  },
+  "camera": {
+    "instruction": "以中景从左向右缓慢环绕沙发",
+    "trajectory_error_px": 8,
+    "max_tolerated_px": 20
+  },
+  "instruction_following": {
+    "n_instructions": 5,
+    "n_failed": 0
+  },
+  "interaction": {
+    "p95_latency_ms": 610
+  },
+  "memory": {
+    "n_steps": 3,
+    "recall_correct": 2
+  },
+  "editability": {
+    "local_edits": 2,
+    "inconsistent_after_edit": 0
+  }
+}
