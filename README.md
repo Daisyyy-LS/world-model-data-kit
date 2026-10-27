@@ -91,6 +91,8 @@ python eval_kit/score.py eval_kit/samples/clip_A_interactive.json
     └── eval_task_cards.md     # 3 张完整评测任务卡
 open_models/
 └── hy-nomas_eval_plan.md      # 腾讯开源 Hy-Nomas：上手路径 + 交互使用 + 4 条评测任务设计
+research/
+└── literature.md              # 论文地图：18 篇文献（编号经 arXiv API 核对）+ 与本套件的对应关系
 ```
 
 工具只依赖 Python 标准库，无需安装任何包。
@@ -152,3 +154,11 @@ Genie 3 博客自己承认的五个局限，每条都是一张可设计的评测
 **为什么这对数据岗重要**：Hy-Nomas 是第一个「代码 + 权重 + 训练与标注流程」全开、且能在单张 4090 上跑的交互式世界模型。它让「生成 → 打分 → 定位缺陷 → 回流标注」这条闭环**第一次可以脱离封闭 API 在本地复现、版本化、做回归**——这正是本套件想标准化的流程。
 
 完整上手与评测设计见 [`open_models/hy-nomas_eval_plan.md`](open_models/hy-nomas_eval_plan.md)（含 Docker / 单卡两种路径、Reactor 本地交互步骤、四条评测任务设计）。
+
+### A6. 论文地图（14 篇，编号经 arXiv 官方 API 核对）
+
+完整版见 [`research/literature.md`](research/literature.md)（含每篇的一句话要点 + 与岗位的关系 + 论文 → 本套件构件的对应表）。索引：
+
+- **奠基与架构**：World Models [1803.10122](https://arxiv.org/abs/1803.10122)｜DreamerV3 [2301.04104](https://arxiv.org/abs/2301.04104)｜Cosmos WFM [2501.03575](https://arxiv.org/abs/2501.03575)｜V-JEPA 2 [2506.09985](https://arxiv.org/abs/2506.09985)｜V-JEPA 2.1 [2603.14482](https://arxiv.org/abs/2603.14482)
+- **交互生成**：Genie [2402.15391](https://arxiv.org/abs/2402.15391)｜GameNGen [2408.14837](https://arxiv.org/abs/2408.14837)｜DIAMOND [2405.12399](https://arxiv.org/abs/2405.12399)｜Navigation World Models [2412.03572](https://arxiv.org/abs/2412.03572)｜Genie 2/3（无 arXiv，官方博客）
+- **评测基准**：牛津综述 [2610.31668](https://arxiv.org/abs/2610.31668)｜RoboWM-Bench [2604.19092](https://arxiv.org/abs/2604.19092)｜EWMBench [2505.09694](https://arxiv.org/abs/2505.09694)｜WBench [2605.25874](https://arxiv.org/abs/2605.25874)｜WorldRoamBench [2606.31672](https://arxiv.org/abs/2606.31672)｜WorldSimBench [2410.18072](https://arxiv.org/abs/2410.18072)｜WorldModelBench [2502.20694](https://arxiv.org/abs/2502.20694)｜ACT-Bench [2412.05337](https://arxiv.org/abs/2412.05337)｜机器人世界模型综述 [2605.00080](https://arxiv.org/abs/2605.00080)
