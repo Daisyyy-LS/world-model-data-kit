@@ -71,6 +71,11 @@ python eval_kit/score.py eval_kit/samples/clip_A_interactive.json
 
 ---
 
+## 配套仓库
+
+- [world-model-playground](https://daisyyy-ls.github.io/world-model-playground/) —— **可交互评测台原型**：按动作步骤标注故障，实时给出 L0–L3 数据回流建议，评测记录可导出（GitHub Pages 在线可玩）
+- [cinematic-shot-spec](https://github.com/Daisyyy-LS/cinematic-shot-spec) —— 分镜语言 → 可计算相机参数 + 越轴自动检测（含 ASCII 俯视图）
+
 ## 目录
 
 ```
