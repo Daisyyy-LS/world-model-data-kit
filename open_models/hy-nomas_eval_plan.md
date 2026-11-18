@@ -1,6 +1,6 @@
 # Hy-Nomas 实测与评测计划（腾讯混元开源交互式世界模型）
 
-> 撰写日期：2026-10-28｜v0.3 更新 2026-11-18｜作者：梁爽
+> 撰写日期：2026-10-28｜v0.3 更新 2026-11-18
 > 状态：Hy-Nomas **仍是计划，尚未实跑**（本机 RTX 2050 4GB 不足以跑世界模型）。但本文档第 5 节提出的「新增跨段一致性维度」已在 v0.3 落地到代码（`score.py` 第 9 维 `crossseg` + 任务卡 4 + 示意样本 `clip_C_crossseg.json`）。另外已真实跑通的是**另一个模型** HunyuanWorld-Mirror（单图 3D 重建，详见 README 附录 A5 与 `eval_kit/samples/real_run/`），不能与 Hy-Nomas 的交互能力混为一谈。
 > 配套：[world-model-playground](https://daisyyy-ls.github.io/world-model-playground/)（评测台 v7，含真实案例）· `eval_kit/score.py`（9 维打分）· `taskcards/eval_task_cards.md`（4 张任务卡）· [cinematic-shot-spec](https://github.com/Daisyyy-LS/cinematic-shot-spec)（分镜/越轴规则）
 
