@@ -2,10 +2,12 @@
 
 **世界模型训练数据：从场景拆解，到评测闭环**
 
-> 作者：梁爽（中国传媒大学 国际新闻学硕士 / 广播电视学本科）· 2026.10
-> 一页纸调研 + 一个可运行的评测原型。为「世界模型训练产品（AI数据与安全）」岗位而做。
+> 作者：梁爽（中国传媒大学 国际新闻学硕士 / 广播电视学本科）· 2026.10 起，2026.11 v0.3 升级
+> 一页纸调研 + 一个可运行的评测原型 + 一条真实模型跑通记录。为「世界模型训练产品 / AI 数据与安全 / 模型评测」岗位而做。
 >
-> **证据边界**：两个 JSON 样例都是人工构造的示意输入，不是模型输出；工具仅按手工整理的元数据做探索性分档，不读取视频。阈值、目标时延与复核线未校准，没有多人一致性或真实模型基准结果。当前作品展示的是流程假设，不是已验证 benchmark。
+> **v0.3 升级（2026-11-18）**：与测评台 `world-model-playground` v7 对齐——维度 8→9（新增「跨段一致性」）、任务卡 3→4、评测脚本接入真实模型输出样本、新增跨仓库对接脚本 `from_playground.py`。腾讯 HunyuanWorld-Mirror 已**真实跑通**并产出 7 件产物，见 `eval_kit/samples/real_run/hunyuanworld_mirror_room.json`。
+>
+> **证据边界**：三个 `clip_*.json` 样例是人工构造的示意输入，不是模型输出。唯一的真实样本是单图 3D 重建，9 个交互维度全部 N/A、不产生分数——它证明「真实 model_output 元信息可追溯」，不证明维度有效性。工具按手工整理的元数据做探索性分档，不读取视频内容。阈值、目标时延与复核线未校准，没有多人一致性或真实模型基准结果。当前作品展示的是流程假设 + 一条真实数据路径，不是已验证 benchmark。
 
 ---
 
@@ -36,7 +38,7 @@
 
 L0–L3 在这里表示**加工阶段建议**，不等于质量等级或样本种类。`positive`、`negative`、`preference_pair`、`trajectory` 等样本类型应单独记录；同一条数据可以既有 L1 结构化标注，也被纳入 L3 失败链。
 
-## 4. 评测维度（8 项）
+## 4. 评测维度（9 项，v0.3 新增跨段一致性）
 
 | 维度 | 怎么测 | 失败长什么样 |
 |---|---|---|
@@ -48,24 +50,34 @@ L0–L3 在这里表示**加工阶段建议**，不等于质量等级或样本�
 | 交互延迟 | 在固定环境记录端到端响应时延，并对照场景目标 | 超过该任务预先设定的目标；目标需按运行环境与产品体验确定 |
 | 长时记忆与因果 | 多步操作后回溯前序状态 | 第三步时忘了第一步挪过椅子 |
 | 局部可编辑性 | 局部重绘后检查周边一致性 | 改了沙发，地板光影穿帮 |
+| **跨段一致性** ★ | 分段自回归模型，比对段边界的外观/光照/布局；记录滑动窗口长度 | 段2→段3 光线突变、主角外套变色 |
 
-## 5. 三张评测任务卡（完整版见 `taskcards/`）
+**为什么加第 9 维**：Hy-Nomas 这类模型用分段自回归 + 持久 KV cache，单段画面正确不等于段间连续；「滑动窗口长度」是官方承认的核心权衡。维度表必须跟着模型架构演进——这条判断在 `open_models/hy-nomas_eval_plan.md` 里提出，v0.3 正式落到 `score.py`（维度 key `crossseg`）和任务卡 4。
+
+## 5. 四张评测任务卡（完整版见 `taskcards/`）
 
 1. **房间回访** — 进 A 房间放 3 个物体 → 离开 → 按任务参数返回（30 秒仅为候选示例），检查物体恒存与空间一致性
 2. **镜头指令还原** — 给一段分镜指令（景别 + 运镜 + 时长），比对生成结果的相机轨迹误差
 3. **因果与记忆链** — 三步连续操作（挪椅子 → 开门 → 放包），最后提问「椅子最初在哪」
+4. **跨段一致性** ★ — 多段连续生成（推近 / 环绕 / 拉回），检查段边界的外观、光照、布局漂移，记录滑动窗口长度（v0.3 新增）
 
 ## 6. 闭环：把评测结果翻译成采集动作
 
 我写了一个可运行的评测原型 `eval_kit/score.py`：输入人工整理的样本元信息，按未校准的规则输出维度探索性分档、观测覆盖率和复核建议。它不会自动判断视频内容，也不会据此断言样本“可用”或模型“高质量”。
 
-这是本项目希望验证的一环：评测记录能否帮助团队定位下一步数据补充方向。是否能降低成本或改善模型表现，需要在实际流程中验证。
+**v0.3 打通了测评台 → 数据套件的链路**：`from_playground.py` 把测评台导出的真实标注记录（`source_type=real_model`）桥接成 score.py 的输入骨架，示意记录默认剔除，绝不混为模型证据。同时收录了一条真实 `model_output` 样本（腾讯 HunyuanWorld-Mirror 真实跑通的完整元信息 + 7 件产物清单）。
 
 ```bash
+# 示意样本（9 维，含第 9 维）
 python eval_kit/score.py eval_kit/samples/clip_A_interactive.json
+python eval_kit/score.py eval_kit/samples/clip_C_crossseg.json
+# 真实模型输出样本（单图 3D 重建，9 维全 N/A，不打分）
+python eval_kit/score.py eval_kit/samples/real_run/hunyuanworld_mirror_room.json
+# 测评台记录 → clip 骨架（示意记录默认剔除）
+python eval_kit/from_playground.py wmfl-records.json -o ./bridged
 ```
 
-输入字段和“已评 / 未评 / N/A”定义见 [`eval_kit/schema.md`](eval_kit/schema.md)。样例输入均为合成示意，解释边界见 [`eval_kit/output_example.md`](eval_kit/output_example.md)。
+输入字段和“已评 / 未评 / N/A”定义见 [`eval_kit/schema.md`](eval_kit/schema.md)。样例解释边界见 [`eval_kit/output_example.md`](eval_kit/output_example.md)。这是本项目希望验证的一环：评测记录能否帮助团队定位下一步数据补充方向；是否能降低成本或改善模型表现，需要在实际流程中验证。
 
 ## 7. 我还不确定、想跟团队聊的
 
@@ -77,26 +89,32 @@ python eval_kit/score.py eval_kit/samples/clip_A_interactive.json
 
 ## 配套仓库
 
-- [world-model-playground](https://daisyyy-ls.github.io/world-model-playground/) —— **可交互流程演示原型**：预设情景演示逐步记录、故障标签和候选数据动作；不是模型评测（GitHub Pages 在线体验）
+- [world-model-playground](https://daisyyy-ls.github.io/world-model-playground/) —— **可交互评测台 v7**：既用 CSS 示意演示评测流程（1–4 步），也内置第 5 步「真实案例」——腾讯 HunyuanWorld-Mirror 真实跑通的 7 件产物可直接查看评测（GitHub Pages 在线体验）；导出的 `wmfl-records.json` 可用本套件 `from_playground.py` 桥接
 - [cinematic-shot-spec](https://github.com/Daisyyy-LS/cinematic-shot-spec) —— 分镜语言 → 可计算相机参数 + 越轴自动检测（含 ASCII 俯视图）
 
 ## 目录
 
 ```
 .
-├── README.md                  # 本文件：一页纸调研
-├── SKILL.md                   # 方法论沉淀：世界模型训练数据设计
+├── README.md                  # 本文件：一页纸调研 + v0.3 升级说明
+├── SKILL.md                   # 方法论沉淀：世界模型训练数据设计（9 维 + 真实样本闭环）
 ├── eval_kit/
-│   ├── score.py               # 可运行：8 维探索性分档 → 复核及数据动作建议
-│   ├── schema.md              # 输入字段说明
-│   ├── samples/               # 两个样例输入
+│   ├── score.py               # 可运行：9 维探索性分档（v0.3 加跨段一致性）
+│   ├── from_playground.py     # v0.3 新增：测评台记录 → clip JSON 骨架（剔除示意）
+│   ├── schema.md              # 输入字段说明（含真实样本与对接规范）
+│   ├── samples/
+│   │   ├── clip_A_interactive.json    # 示意：室内交互
+│   │   ├── clip_B_cinematic.json      # 示意：影视分镜
+│   │   ├── clip_C_crossseg.json       # v0.3 示意：第 9 维跨段一致性
+│   │   └── real_run/
+│   │       └── hunyuanworld_mirror_room.json  # 真实：腾讯模型跑通的完整元信息（9 维 N/A）
 │   └── output_example.md      # 输出状态定义与解释限制
-└── taskcards/
-    └── eval_task_cards.md     # 3 张完整评测任务卡
-open_models/
-└── hy-nomas_eval_plan.md      # 腾讯开源 Hy-Nomas：上手路径 + 交互使用 + 4 条评测任务设计
-research/
-└── literature.md              # 论文地图：来源索引及其与本套件的对应关系
+├── taskcards/
+│   └── eval_task_cards.md     # 4 张完整评测任务卡（v0.3 加跨段一致性）
+├── open_models/
+│   └── hy-nomas_eval_plan.md  # 腾讯开源 Hy-Nomas：上手 + 交互 + 跨段一致性维度设计
+└── research/
+    └── literature.md          # 论文地图：来源索引及其与本套件的对应关系
 ```
 
 工具只依赖 Python 标准库，无需安装任何包。运行可用于查看原型输出，不等同于基准测试或方法验证。
@@ -124,7 +142,7 @@ research/
 |---|---|---|---|
 | **RoboWM-Bench** | 把生成视频经逆动力学转成动作、进物理仿真执行，验证「视觉合理 ≠ 具身可执行」 | [arXiv:2604.19092](https://arxiv.org/abs/2604.19092) | 印证「打分 → 回流」闭环的必要性：分数聚集但执行差异显著 |
 | **视频与世界模型综述** | 讨论视频观察与演化世界之间的关系，并按读/写/共享/交互组织研究 | [arXiv:2610.31668](https://arxiv.org/abs/2610.31668)（2026-10-22） | 本项目自拟 E1–E4 证据档位受其启发；不是论文原有分类或模型判定标准 |
-| **EWMBench** | 具身世界模型：场景一致性 / 运动质量 / 动作条件遵循 | [arXiv:2505.09694](https://arxiv.org/abs/2505.09694) | 与 8 维中的空间关系、运动合理性对应 |
+| **EWMBench** | 具身世界模型：场景一致性 / 运动质量 / 动作条件遵循 | [arXiv:2505.09694](https://arxiv.org/abs/2505.09694) | 与 9 维中的空间关系、运动合理性对应 |
 | **ACT-Bench** | 「给动作 → 画面是否照做」 | [arXiv:2412.05337](https://arxiv.org/abs/2412.05337) | 对应 L2 交互轨迹层的（指令， 执行结果）配对 |
 | **WorldRoamBench** | 交互世界模型长时程稳定性（开放世界漫游） | [arXiv:2606.31672](https://arxiv.org/abs/2606.31672) | 对应任务卡 1「房间回访」的回访距离 × 状态保持设计 |
 | **WBench** | 多轮交互式视频世界模型评测 | [arXiv:2605.25874](https://arxiv.org/abs/2605.25874) | 对应「多步交互后状态可追踪」 |
@@ -154,10 +172,11 @@ Genie 3 博客自己承认的五个局限，每条都是一张可设计的评测
 | **Hy-Nomas** | 腾讯发布的自由形态交互式世界生成项目；官方仓库提供模型代码、权重和使用说明 | [GitHub](https://github.com/Tencent-Hunyuan/Hy-Nomas) · [HF 权重](https://huggingface.co/tencent/Hy-Nomas) | 官方仓库列有单张 RTX 4090 低显存推理配置；速度、时长与可运行性需本人实测 |
 | **HY-World 2.0**（2026-04） | 多模态 **3D** 世界模型：全景生成 → 轨迹规划 → 世界扩展 → 合成，输出 3DGS/mesh，可漫游带物理碰撞 | [GitHub](https://github.com/Tencent-Hunyuan/HY-World-2.0)（2.8k★）· WorldMirror-2（~1.2B）、HY-Pano-2（~80B）权重已开 | 产品页可免费试用 |
 | **HunyuanWorld-1.0**（2025-07） | 文本/图像 → 可交互沉浸式 3D 世界，可导出 mesh 供 CG 管线使用 | [GitHub](https://github.com/Tencent-Hunyuan/HunyuanWorld-1.0)（3.0k★） | 混元 3D 创作引擎 |
+| **HunyuanWorld-Mirror**（ICML 2026）★ | 前馈式通用 3D 几何预测：图/视频 → 点云/深度/法线/相机/3DGS；**本项目已真实跑通** | [GitHub](https://github.com/Tencent-Hunyuan/HunyuanWorld-Mirror) · [在线 Space](https://huggingface.co/spaces/tencent/HunyuanWorld-Mirror) | 7 件真实产物已收录本套件 |
 
-**与数据岗的关系**：公开代码和低显存配置为本地实验提供了候选对象。该项目尚未在本套件中实际运行；本文不声称它是“第一个”，也不声称评测闭环已复现。
+**与数据岗的关系（2026-11-18 更新）**：本机 RTX 2050 4GB 跑不动世界模型，改走腾讯官方 ZeroGPU 云端——**已用 HF 认证真实跑通 HunyuanWorld-Mirror**，对官方示例室内图做单图 3D 重建，产出 3DGS 点云（119,351 高斯基元）、深度图、法线图、相机参数、双漫游视频共 7 件产物。`run_meta.json` 记录端点、耗时（预处理 6.8s + 重建 82.4s）、字节数与认证状态，完整样本见 `eval_kit/samples/real_run/`。**诚实边界**：这是单图几何重建，不测交互/时序行为，本套件 9 维全部 N/A；不声称评测闭环已复现，也不把几何重建当成 Hy-Nomas 那类交互模型的替代。Hy-Nomas 仍未实跑。
 
-完整上手与评测设计见 [`open_models/hy-nomas_eval_plan.md`](open_models/hy-nomas_eval_plan.md)（含 Docker / 单卡两种路径、Reactor 本地交互步骤、四条评测任务设计）。
+完整上手与评测设计见 [`open_models/hy-nomas_eval_plan.md`](open_models/hy-nomas_eval_plan.md)（含 Docker / 单卡两种路径、Reactor 本地交互步骤、四条评测任务设计 + v0.3 已落地的跨段一致性维度）。
 
 ### A6. 论文地图（索引数量以完整文档当前条目为准）
 

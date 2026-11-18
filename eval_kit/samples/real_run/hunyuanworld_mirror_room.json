@@ -1,0 +1,63 @@
+{
+  "clip_id": "REAL-HYMIRROR-001",
+  "scenario": "腾讯 HunyuanWorld-Mirror 单图 3D 几何重建：官方示例室内图 → 3DGS / 深度图 / 法线图 / 相机参数 / 漫游视频（真实跑通，非示意）",
+  "duration_sec": 94.2,
+  "sample_type": "model_output",
+  "source_note": "真实模型输出。2026-11-18 用 HF 认证调用腾讯官方 ZeroGPU 云端 Space 跑通，产物下载自 tencent/HunyuanWorld-Mirror。边界：这是单图前馈 3D 重建，不是交互式/视频世界生成；本套件 9 个维度都是为「交互行为与时序状态」设计的，均不适用于单帧几何重建，故全部标 N/A。此样本的用途是验证 model_output 数据路径与元信息可追溯性（模型/端点/参数/产物/授权/复核口径齐全），并作为跨仓库对接的真实示例；它不构成任何维度分数，也不证明 9 维体系对 3D 重建类模型有效。相机位姿在单图前馈重建中接近单位阵，不能作为位姿估计能力的证据。几何重建精度需专门的 3D 指标（如 depth/法线误差、点云 PSNR），本套件当前未覆盖，属已知局限。",
+
+  "model": {
+    "name": "HunyuanWorld-Mirror",
+    "version": "ICML 2026 · 官方在线 Space (tencent/HunyuanWorld-Mirror) · Gradio 5.49.1"
+  },
+  "run_metadata": {
+    "generated_at": "2026-11-18 20:02:43",
+    "prompt_version": "single-image-3D-recon / official example",
+    "environment": "HuggingFace ZeroGPU（authenticated，非匿名配额）",
+    "parameters": {
+      "endpoint": "https://tencent-hunyuanworld-mirror.hf.space/",
+      "input_image": "bright_room_1.jpg",
+      "input_source": "official Space example: examples/realistic/Bright_Room/image_0001.jpg",
+      "interval": 1.0,
+      "step_update_gallery_sec": 6.8,
+      "step_gradio_demo_sec": 82.4,
+      "source_type": "real_model",
+      "authenticated": true
+    },
+    "seed": null
+  },
+  "source_metadata": {
+    "asset_id": "Bright_Room/image_0001.jpg（腾讯官方 Space 公开示例）",
+    "authorization_status": "official_public_example",
+    "sensitivity": "low"
+  },
+  "review_metadata": {
+    "annotator_id": "unassigned（产物已生成，尚未进入人工复核）",
+    "task_card_version": "N/A · 本样本无对应交互任务卡",
+    "confidence": "not_assessed",
+    "adjudication_state": "not_reviewed"
+  },
+
+  "artifacts": [
+    {"file": "rgb_video.mp4", "kind": "video", "bytes": 497192},
+    {"file": "depth_video.mp4", "kind": "video", "bytes": 647394},
+    {"file": "depth_map.png", "kind": "image", "bytes": 41246, "resolution": "518x294"},
+    {"file": "normal_map.png", "kind": "image", "bytes": 137968, "resolution": "518x294"},
+    {"file": "gaussian_splatting.ply", "kind": "point_cloud", "bytes": 8116284, "gaussians": 119351},
+    {"file": "pointmap_mesh.glb", "kind": "mesh", "bytes": 2437912},
+    {"file": "camera_params.json", "kind": "structured", "bytes": 945}
+  ],
+  "meta_path": "world-model-playground/real_run/run_meta.json",
+  "artifact_path": "world-model-playground/real_run/output/",
+
+  "not_applicable": [
+    "consistency",
+    "permanence",
+    "physics",
+    "camera",
+    "instruction",
+    "latency",
+    "memory",
+    "editability",
+    "crossseg"
+  ]
+}

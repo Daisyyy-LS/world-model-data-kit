@@ -74,7 +74,7 @@ def validate_clip(clip: dict) -> None:
                 missing = ", ".join(sorted(fields - set(value or {}))) if isinstance(value, dict) else ", ".join(sorted(fields))
                 raise ValueError(f"model_output 样本必须提供 {key} 对象及字段：{missing}；未知值可明确填 null")
     na = clip.get("not_applicable", [])
-    known = {"consistency", "permanence", "physics", "camera", "instruction", "latency", "memory", "editability"}
+    known = {"consistency", "permanence", "physics", "camera", "instruction", "latency", "memory", "editability", "crossseg"}
     if not isinstance(na, list) or any(not isinstance(x, str) for x in na):
         raise ValueError("not_applicable 必须是维度 key 数组")
     unknown = set(na) - known
@@ -88,6 +88,7 @@ def validate_clip(clip: dict) -> None:
         ("instruction_following", "n_failed", "n_instructions"),
         ("editability", "inconsistent_after_edit", "local_edits"),
         ("memory", "recall_correct", "n_checkpoints"),
+        ("cross_segment", "drift_segments", "segments_checked"),
     ]:
         data = _obj(clip, section)
         n = _count(data, num_key, f"{section}.{num_key}")
@@ -113,6 +114,9 @@ def validate_clip(clip: dict) -> None:
     for key in ("p95_latency_ms", "latency_target_ms"):
         if key in interaction:
             _number(interaction[key], f"interaction.{key}", minimum=0.001 if key == "latency_target_ms" else 0)
+    cross = _obj(clip, "cross_segment")
+    if "sliding_window_frames" in cross:
+        _number(cross["sliding_window_frames"], "cross_segment.sliding_window_frames", minimum=0)
 
 
 def _band(rate: float, good: float, ok: float, fair: float, poor: float) -> float:
@@ -189,6 +193,24 @@ def _memory(clip: dict):
     return _band(error, 0.0, 0.20, 0.40, 0.65), f"{correct}/{steps} 个状态回溯点正确；错误率 {error:.1%}"
 
 
+def _crossseg(clip: dict):
+    """跨段一致性：分段自回归模型在段边界的外观/光照/布局漂移。
+
+    仅在样本声明了段边界观测时可评；sliding_window_frames 是模型配置变量，
+    仅作元信息提示，不参与分档（阈值尚未按窗口长度校准）。
+    """
+    data = _obj(clip, "cross_segment")
+    segments = _count(data, "segments_checked", "cross_segment.segments_checked")
+    drift = _count(data, "drift_segments", "cross_segment.drift_segments")
+    if segments is None or drift is None or segments == 0:
+        return None
+    rate = drift / segments
+    window = data.get("sliding_window_frames")
+    window_note = f"；滑动窗口 {window:g} latent frames（未校准变量）" if isinstance(window, (int, float)) and not isinstance(window, bool) else ""
+    return _band(rate, 0.0, 0.12, 0.30, 0.55), (
+        f"{drift}/{segments} 个段边界出现漂移；漂移率 {rate:.1%}{window_note}")
+
+
 DIMENSIONS = [
     Dimension("consistency", "时空一致性", "回访时静态元素是否保持", "房间回访后布局漂移", "L1", "补静态元素持久 ID 与属性快照", _rate_dimension("revisit", "static_element_mismatch", "checked_elements", "", (0.0, .03, .10, .25), "错配率")),
     Dimension("permanence", "物体恒存", "遮挡后物体身份与属性是否保持", "杯子重新出现后颜色改变", "L1", "补遮挡前后物体 ID 与属性标注", _rate_dimension("object_permanence", "attr_changed_after_occlusion", "occluded_objects", "", (0.0, .05, .15, .30), "漂移率")),
@@ -198,6 +220,7 @@ DIMENSIONS = [
     Dimension("latency", "交互延迟", "动作输入到响应的端到端时延", "响应时延超过场景目标", "L2", "记录硬件、负载、计时边界和时延分布", _latency),
     Dimension("memory", "长时记忆与因果", "多步操作后关键状态是否可回溯", "后续操作使用旧状态", "L2；经复核后可进入 L3", "保留完整动作链与关键状态检查点", _memory),
     Dimension("editability", "局部可编辑性", "局部修改后非编辑区域是否稳定", "修改沙发导致周边光影变化", "L1", "补编辑前后样本、遮罩与变化区域", _rate_dimension("editability", "inconsistent_after_edit", "local_edits", "", (0.0, .15, .35, .55), "周边不一致率")),
+    Dimension("crossseg", "跨段一致性", "分段自回归模型段边界的外观/光照/布局漂移", "段2 光线突变、主体服装变了", "L2；经复核后可进入 L3", "记录段边界证据帧、滑动窗口长度与持久记忆配置", _crossseg),
 ]
 PASS_LINE = 3.5  # Exploratory triage threshold only; not a model release criterion.
 

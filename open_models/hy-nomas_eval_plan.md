@@ -1,8 +1,8 @@
 # Hy-Nomas 实测与评测计划（腾讯混元开源交互式世界模型）
 
-> 撰写日期：2026-10-28｜作者：梁爽
-> 状态：**计划，不是结果**。我手上没有 GPU，尚未实跑；下面是基于官方 README 与公开报道整理的上手路径与评测设计，所有结论需在实跑后回填。
-> 配套：[world-model-playground](https://daisyyy-ls.github.io/world-model-playground/)（评测台原型）· `eval_kit/score.py`（8 维打分）· `taskcards/eval_task_cards.md`（3 张任务卡）· [cinematic-shot-spec](https://github.com/Daisyyy-LS/cinematic-shot-spec)（分镜/越轴规则）
+> 撰写日期：2026-10-28｜v0.3 更新 2026-11-18｜作者：梁爽
+> 状态：Hy-Nomas **仍是计划，尚未实跑**（本机 RTX 2050 4GB 不足以跑世界模型）。但本文档第 5 节提出的「新增跨段一致性维度」已在 v0.3 落地到代码（`score.py` 第 9 维 `crossseg` + 任务卡 4 + 示意样本 `clip_C_crossseg.json`）。另外已真实跑通的是**另一个模型** HunyuanWorld-Mirror（单图 3D 重建，详见 README 附录 A5 与 `eval_kit/samples/real_run/`），不能与 Hy-Nomas 的交互能力混为一谈。
+> 配套：[world-model-playground](https://daisyyy-ls.github.io/world-model-playground/)（评测台 v7，含真实案例）· `eval_kit/score.py`（9 维打分）· `taskcards/eval_task_cards.md`（4 张任务卡）· [cinematic-shot-spec](https://github.com/Daisyyy-LS/cinematic-shot-spec)（分镜/越轴规则）
 
 > **许可提示**：模型代码、权重及相关材料的许可需分别以官方仓库和权重页面当前条款为准；不要仅凭“开源”推断可商用。
 
@@ -71,26 +71,26 @@ cd reactor/demo && npm ci && npm run dev -- --port 5173
 
 四条任务，每条产出一个 clip JSON，直接喂给 `eval_kit/score.py`：
 
-| 任务 | 分段指令 | 主要测什么（8 维中的子集） | 对应我已有的资产 |
+| 任务 | 分段指令 | 主要测什么（9 维中的子集） | 对应我已有的资产 |
 |---|---|---|---|
 | **T1 影视分镜** | 段1 中景双人对话 → 段2 推近 → 段3 环绕 120° | 相机控制精度、跨视角一致性、主体 ID 稳定 | cinematic-shot-spec 的景别/越轴规则：环绕后窗户与视线方向是否仍在同侧 |
 | **T2 事件持久化** | 段1「下起雨」→ 段2、3 只给相机指令，不提天气 | 状态持续性（雨是否还在） | playground 的世界事件注入 chips |
 | **T3 房间回访** | 段1 布置房间 → 段2–4 离场穿行 → 段5 返回原房间 | 空间记忆、拓扑一致性 | taskcards 任务卡 1「房间回访」 |
 | **T4 双主体协作** | 段1 A 递物给 B → 段2 B 放置 | 多智能体交互、接触时序、因果链 | 对应 Genie 3 自曝的「多智能体交互难」 |
 
-**需要新增的一个维度**：现有 8 维是按「一段生成结果」设计的；Hy-Nomas 是分段生成且自带 lifelong KV cache，应增加 **跨段一致性**（段间主体外观 / 光照 / 布局的漂移量），并把「滑动窗口长度」作为显式变量记录在 clip 里——它是官方自认的核心权衡点。
+**跨段一致性维度（v0.3 已落地）**：原 8 维是按「一段生成结果」设计的；Hy-Nomas 是分段生成且自带 lifelong KV cache，因此增加 **跨段一致性**（段间主体外观 / 光照 / 布局的漂移量），并把「滑动窗口长度」作为显式变量记录在 clip 里——它是官方自认的核心权衡点。该判断在 2026-10 的本文档提出，2026-11 已落到 `eval_kit/score.py`（维度 key `crossseg`）、任务卡 4 与示意样本 `clip_C_crossseg.json`。这本身就是「维度表跟着模型架构演进」的产品判断。**Hy-Nomas 本体仍未实跑，上述维度尚未在真实样本上验证。**
 
 **预期最容易掉分的两项**（赌，待实跑验证）：T2 事件持久化、T3 房间回访。理由：官方 README 明确说明标准配置会「随生成持续消耗越来越多缓存」，记忆是这类模型的共同瓶颈。
 
 ## 6. 输出与回流
 
 1. 每段结果填一个 clip JSON（字段见 `eval_kit/schema.md`）
-2. `python eval_kit/score.py samples/clip_xxx.json` → 8 维打分 + 数据回流建议
+2. `python eval_kit/score.py eval_kit/samples/clip_xxx.json` → 9 维打分 + 数据回流建议（含跨段一致性）
 3. 汇总成一张表：任务 × 维度 × 得分 × 回流层（L0–L3）× 建议采集动作
 4. 把失败样本按 L3 整条入库（不是截单帧——记忆类缺陷必须是序列级样本）
 
 ## 7. 诚实边界（面试时我会主动说清）
 
-- **这是计划不是结果**：我目前没有 GPU 环境，上述能力描述全部来自官方 README 与公开报道，尚未实跑验证
+- **Hy-Nomas 这是计划不是结果**：本机无可用 GPU（RTX 2050 4GB），Hy-Nomas 能力描述全部来自官方 README 与公开报道，尚未实跑验证。已真实跑通的是另一个模型 HunyuanWorld-Mirror（走腾讯官方 ZeroGPU 云端，单图 3D 重建），两者路线不同，不可互相替代；详见 README 附录 A5
 - **Hy-Nomas-Bench**（媒体报道提到的 280 条测试用例、含 spatial-memory 子集）：我未能在 Hugging Face 上直接打开该数据集页面，链接与规模待核实
 - 技术报告官方标注为 **Coming Soon**，模型分数尚未由官方公布，第三方复现结果也还没有

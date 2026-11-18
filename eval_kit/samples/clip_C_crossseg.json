@@ -1,0 +1,26 @@
+{
+  "clip_id": "C-03-cross-segment-demo",
+  "scenario": "分段自回归交互模型（如 Hy-Nomas 类）：4 段连续生成，检查段边界外观/光照/布局漂移",
+  "duration_sec": 40,
+  "sample_type": "synthetic_demo",
+  "source_note": "人工构造的示意计数，用于演示第 9 维「跨段一致性」的分档流程；非任何模型的真实输出，指标均未实测。真实评测时每段需保留段边界证据帧与滑动窗口配置。",
+  "model": null,
+  "run_metadata": null,
+  "review_metadata": {"annotator_id": "example-only", "guide_version": "draft-0.3", "confidence": "not_assessed"},
+  "not_applicable": ["latency"],
+
+  "cross_segment": {
+    "segments_checked": 4,
+    "drift_segments": 1,
+    "sliding_window_frames": 18,
+    "drift_notes": "段2→段3 之间墙面光照突变，主体外套颜色由深变浅；段1→2、段3→4 稳定"
+  },
+  "instruction_following": {
+    "n_instructions": 4,
+    "n_failed": 0
+  },
+  "memory": {
+    "n_checkpoints": 3,
+    "recall_correct": 2
+  }
+}

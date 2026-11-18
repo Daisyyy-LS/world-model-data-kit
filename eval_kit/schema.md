@@ -56,6 +56,7 @@
 | `latency` | `interaction.p95_latency_ms`、`latency_target_ms` | 实测 P95 与本任务明确配置的目标；同时记录硬件、负载、计时边界和预热策略 |
 | `memory` | `memory.n_checkpoints`、`recall_correct` | 预先定义的状态检查点总数及正确检查数；应保存各检查点明细，不能把动作步数直接当作记忆题数 |
 | `editability` | `editability.local_edits`、`inconsistent_after_edit` | 编辑次数与非编辑区域不一致数 |
+| `crossseg` | `cross_segment.segments_checked`、`drift_segments`（可选 `sliding_window_frames`） | 分段自回归模型的段边界总数与出现漂移的段数；`sliding_window_frames` 为官方配置变量，仅作元信息提示、不参与分档（阈值未按窗口长度校准） |
 
 计数必须是非负整数，错误数不能超过检查数。`camera` 的误差、容差和画幅单位须一致。`latency_target_ms` 是场景配置而非行业通用常数。
 
@@ -73,3 +74,14 @@
 - **L3 归因与学习用途**：经复核的失败链、偏好对或 hard negative；必须记录样本用途和证据，不是所有失败都自动进入 L3。
 
 样本类型（如 `positive`、`negative`、`preference_pair`、`trajectory`）应单独记录；一条记录可同时有 L1 标注并被指定为 L3 失败样本。
+
+## 真实样本与跨仓库对接（v0.3 新增）
+
+- `samples/real_run/hunyuanworld_mirror_room.json` 是一条 `sample_type=model_output` 的**真实样本**：2026-11-18 用 HF 认证调用腾讯官方 HunyuanWorld-Mirror Space 跑通，含完整 model / run_metadata / source_metadata / review_metadata 与 7 件产物清单。它是**单图前馈 3D 重建**，9 个维度全部显式声明为 N/A——因为本套件维度面向交互/时序行为，不适用几何重建；`score.py` 对它输出覆盖率 N/A、不产生分数。该样本证明的是「真实 model_output 元信息可追溯」，不是 9 维有效性证据。
+- `samples/clip_C_crossseg.json` 是第 9 维「跨段一致性」的**合成示意**样本，展示分段自回归模型的段边界漂移如何分档。
+- `from_playground.py` 把测评台（`world-model-playground`）导出的 `wmfl-records.json` 桥接为本 schema 的 clip 骨架：只搬运元信息与故障标签映射（`playground_annotations`），**不凭故障标签反推观测计数**；输出各维度仍未评，须人工补齐观测字段后才能打分。默认剔除 `schematic`（CSS 示意）记录，避免污染真实评测。
+
+```bash
+python eval_kit/from_playground.py wmfl-records.json -o ./bridged
+python eval_kit/score.py ./bridged/LIVE-xxxxxx.json   # 维度未评，待补观测
+```

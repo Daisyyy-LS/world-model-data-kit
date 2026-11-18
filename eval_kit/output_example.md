@@ -1,6 +1,8 @@
 # 输出示例说明
 
-仓库中的 `clip_A_interactive.json` 和 `clip_B_cinematic.json` 是**人工构造的示意输入**，不是任何模型的真实输出或真实评测结果。运行 `score.py` 会据这些占位计数生成探索性分档；这只能证明脚本处理了输入，不能证明模型能力或阈值有效。
+仓库中的 `clip_A_interactive.json`、`clip_B_cinematic.json`、`clip_C_crossseg.json` 是**人工构造的示意输入**，不是任何模型的真实输出或真实评测结果。运行 `score.py` 会据这些占位计数生成探索性分档；这只能证明脚本处理了输入，不能证明模型能力或阈值有效。
+
+`samples/real_run/hunyuanworld_mirror_room.json` 是唯一的**真实模型输出**样本（腾讯 HunyuanWorld-Mirror 单图 3D 重建，2026-11-18 真实跑通）。但它是单图几何重建，本套件 9 个交互维度全部声明 N/A，`score.py` 对其输出覆盖率 N/A、不打分——它证明的是真实 model_output 元信息路径可追溯，而非维度有效性。别把它误读成"模型拿了满分"或"模型不及格"。
 
 当前输出会逐维呈现以下状态：
 
@@ -17,6 +19,11 @@
 ```bash
 python eval_kit/score.py eval_kit/samples/clip_A_interactive.json
 python eval_kit/score.py eval_kit/samples/clip_B_cinematic.json --json
+python eval_kit/score.py eval_kit/samples/clip_C_crossseg.json          # 第9维示意
+python eval_kit/score.py eval_kit/samples/real_run/hunyuanworld_mirror_room.json  # 真实样本：全 N/A
+
+# 把测评台导出的真实记录桥接成 clip 骨架（示意记录默认剔除）
+python eval_kit/from_playground.py wmfl-records.json -o ./bridged
 ```
 
-阈值需通过场景专家校准、小规模双人试标和分歧复盘后再调整。本仓库目前没有多人一致性数据，也没有真实模型基准结果。
+阈值需通过场景专家校准、小规模双人试标和分歧复盘后再调整。本仓库目前没有多人一致性数据，也没有真实模型基准结果；唯一的真实样本不产生维度分数。
